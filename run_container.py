@@ -31,6 +31,7 @@ from voicevox_engine.synthesis_engine import SynthesisEngine
 class TTSRequest(BaseModel):
     text: str
     speaker: int
+    speed: float = 1.0
 
 def make_synthesis_engine(
     use_gpu: bool,
@@ -240,7 +241,7 @@ def generate_app(engine: SynthesisEngine) -> FastAPI:
         accent_phrases = create_accent_phrases(text, speaker_id=speaker)
         query = AudioQuery(
             accent_phrases=accent_phrases,
-            speedScale=1,
+            speedScale=body.speed,
             pitchScale=0,
             intonationScale=1,
             volumeScale=1,
