@@ -28,6 +28,7 @@ from voicevox_engine.model import (
 from voicevox_engine.mora_list import openjtalk_mora2text
 from voicevox_engine.synthesis_engine import SynthesisEngine
 
+kMoraLimit = 100
 class TTSRequest(BaseModel):
     text: str
     speaker: int
@@ -239,8 +240,17 @@ def generate_app(engine: SynthesisEngine) -> FastAPI:
         text = body.text
         speaker = body.speaker
         accent_phrases = create_accent_phrases(text, speaker_id=speaker)
+        trunc = []
+        mora_length = 0
+        for accent in accent_phrases:
+            mora_length += len(accent.moras)
+            if mora_length > kMoraLimit:
+                break
+            trunc.append(accent)
+        print("[%d moras] %s..." % (mora_length, body.text[:5]))
+
         query = AudioQuery(
-            accent_phrases=accent_phrases,
+            accent_phrases=trunc,
             speedScale=body.speed,
             pitchScale=0,
             intonationScale=1,
