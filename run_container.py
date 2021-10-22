@@ -1,6 +1,7 @@
 import argparse
 import base64
 import io
+import os
 import sys
 import zipfile
 from pathlib import Path
@@ -280,11 +281,13 @@ def generate_app(engine: SynthesisEngine) -> FastAPI:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=50021)
+    parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--use_gpu", action="store_true")
     parser.add_argument("--voicevox_dir", type=Path, default=None)
     parser.add_argument("--voicelib_dir", type=Path, default=None)
     args = parser.parse_args()
+    if args.port is None:
+        args.port = int(os.environ.get("PORT", "50021"))
     uvicorn.run(
         generate_app(
             make_synthesis_engine(

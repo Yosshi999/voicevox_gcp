@@ -115,4 +115,5 @@ COPY --chmod=775 ./entrypoint.sh /entrypoint.sh
 
 RUN useradd --create-home user && ldconfig
 ENTRYPOINT [ "/entrypoint.sh" ]
+ENV PORT=50021
 CMD [ "gosu", "user", "python3", "-B", "./run_container.py", "--voicevox_dir", "/opt/voicevox_core/", "--voicelib_dir", "/opt/voicevox_core/", "--host", "0.0.0.0" ]
