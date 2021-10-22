@@ -45,12 +45,14 @@ ARG LIBTORCH_URL=https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-sh
 RUN <<EOF
     wget -nv --show-progress -c -O "./libtorch.zip" "${LIBTORCH_URL}"
     unzip "./libtorch.zip"
-    mv ./libtorch /opt/libtorch
+    mkdir -p /opt/libtorch
+    mv ./libtorch/lib/*.so /opt/libtorch
+    mv ./libtorch/lib/*.so.* /opt/libtorch
     rm ./libtorch.zip
 EOF
 
 RUN <<EOF
-    LIBTORCH_PATH="/opt/libtorch/lib"
+    LIBTORCH_PATH="/opt/libtorch"
     echo "${LIBTORCH_PATH}" > /etc/ld.so.conf.d/libtorch.conf
     rm -f /etc/ld.so.cache
     ldconfig
@@ -109,12 +111,8 @@ COPY --from=download-engine-env /opt/voicevox_engine /opt/voicevox_engine
 
 COPY ./run_container.py /opt/voicevox_engine/
 
-COPY --chmod=775 <<EOF /entrypoint.sh
-#!/bin/bash
-cat /opt/voicevox_core/README.txt > /dev/stderr
-exec "\$@"
-EOF
+COPY --chmod=775 ./entrypoint.sh /entrypoint.sh
 
 RUN useradd --create-home user && ldconfig
 ENTRYPOINT [ "/entrypoint.sh" ]
-CMD [ "gosu", "user", "python3", "./run_container.py", "--voicevox_dir", "/opt/voicevox_core/", "--voicelib_dir", "/opt/voicevox_core/", "--host", "0.0.0.0" ]
+CMD [ "gosu", "user", "python3", "-B", "./run_container.py", "--voicevox_dir", "/opt/voicevox_core/", "--voicelib_dir", "/opt/voicevox_core/", "--host", "0.0.0.0" ]
