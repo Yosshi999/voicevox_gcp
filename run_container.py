@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.responses import FileResponse
 
-from voicevox_engine.full_context_label import extract_full_context_label
+from voicevox_engine.full_context_label import extract_full_context_label, pyopenjtalk
 from voicevox_engine.kana_parser import create_kana, parse_kana
 from voicevox_engine.model import (
     AccentPhrase,
@@ -54,6 +54,8 @@ def make_synthesis_engine(
         音声ライブラリ自体があるディレクトリ
         None のとき、音声ライブラリの Python モジュールと同じディレクトリにあるとする
     """
+
+    pyopenjtalk.set_user_dict("/opt/voicevox_engine/user.dic")
 
     # Python モジュール検索パスへ追加
     if voicevox_dir is not None:
@@ -223,6 +225,30 @@ def generate_app(engine: SynthesisEngine) -> FastAPI:
             waves_nparray.append(_data)
 
         return waves_nparray, sampling_rate
+
+    @app.post(
+        "/audio_query",
+        response_model=AudioQuery,
+        tags=["クエリ作成"],
+        summary="音声合成用のクエリを作成する",
+    )
+    def audio_query(text: str, speaker: int):
+        """
+        クエリの初期値を得ます。ここで得られたクエリはそのまま音声合成に利用できます。各値の意味は`Schemas`を参照してください。
+        """
+        accent_phrases = create_accent_phrases(text, speaker_id=speaker)
+        return AudioQuery(
+            accent_phrases=accent_phrases,
+            speedScale=1,
+            pitchScale=0,
+            intonationScale=1,
+            volumeScale=1,
+            prePhonemeLength=0.1,
+            postPhonemeLength=0.1,
+            outputSamplingRate=default_sampling_rate,
+            outputStereo=False,
+            kana=create_kana(accent_phrases),
+        )
 
     @app.post(
         "/tts",
