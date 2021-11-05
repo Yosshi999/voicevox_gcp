@@ -64,7 +64,7 @@ FROM ${BASE_IMAGE} AS download-engine-env
 
 RUN <<EOF
     apt-get update
-    apt-get install -y cmake
+    apt-get install -y cmake mecab libmecab-dev
     apt-get clean
     rm -rf /var/lib/apt/lists/*
 EOF
@@ -73,9 +73,6 @@ ARG VOCIEVOX_ENGINE_VERSION=0.7.0
 RUN git clone -b "${VOCIEVOX_ENGINE_VERSION}" --depth 1 https://github.com/Hiroshiba/voicevox_engine.git /opt/voicevox_engine
 WORKDIR /opt/voicevox_engine
 RUN pip3 install -r requirements.txt
-
-# execute lazy_init and download mecab dic
-RUN python3 -c "import pyopenjtalk;print(pyopenjtalk.g2p('ハローワールド'))"
 
 COPY --from=download-core-env /etc/ld.so.conf.d/voicevox_core.conf /etc/ld.so.conf.d/voicevox_core.conf
 COPY --from=download-core-env /opt/voicevox_core /opt/voicevox_core
@@ -88,6 +85,17 @@ RUN <<EOF
     LIBRARY_PATH="$LIBRARY_PATH:/opt/voicevox_core" pip3 install .
 EOF
 
+RUN <<EOF
+    wget -nv --show-progress -c -O "./additional_openjtalk_dic.zip" "https://github.com/takana-v/additional_openjtalk_dic/releases/download/0.0.1/additional_openjtalk_dic.zip"
+    unzip "./additional_openjtalk_dic.zip"
+    mkdir -p /opt/voicevox_engine/tdmelodic
+    mv ./additional_openjtalk_dic/additional_openjtalk_dic.csv /usr/share/mecab/dic/juman/* /opt/voicevox_engine/tdmelodic
+    rm ./additional_openjtalk_dic.zip
+    rm -r ./additional_openjtalk_dic
+    cd /opt/voicevox_engine/tdmelodic
+    /usr/lib/mecab/mecab-dict-index -f utf-8 -t utf-8
+    rm *.csv
+EOF
 
 # Runtime
 FROM ${BASE_RUNTIME_IMAGE} AS runtime-env
@@ -116,4 +124,5 @@ COPY --chmod=775 ./entrypoint.sh /entrypoint.sh
 RUN useradd --create-home user && ldconfig
 ENTRYPOINT [ "/entrypoint.sh" ]
 ENV PORT=50021
+ENV OPEN_JTALK_DICT_DIR=/opt/voicevox_engine/tdmelodic
 CMD [ "gosu", "user", "python3", "-B", "./run_container.py", "--voicevox_dir", "/opt/voicevox_core/", "--voicelib_dir", "/opt/voicevox_core/", "--host", "0.0.0.0" ]
