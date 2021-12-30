@@ -7,7 +7,7 @@ ARG BASE_RUNTIME_IMAGE=python:3.7.12-slim-bullseye
 FROM ${BASE_IMAGE} AS download-core-env
 WORKDIR /work
 
-ARG VOICEVOX_CORE_VERSION=0.9.0
+ARG VOICEVOX_CORE_VERSION=0.9.4
 ARG VOICEVOX_CORE_LIBRARY_NAME=core_cpu
 RUN <<EOF
     wget -nv --show-progress -c -O "./core.zip" "https://github.com/Hiroshiba/voicevox_core/releases/download/${VOICEVOX_CORE_VERSION}/core.zip"
@@ -84,7 +84,7 @@ RUN <<EOF
     rm -rf ./*
 EOF
 
-ARG VOCIEVOX_ENGINE_VERSION=0.9.1
+ARG VOCIEVOX_ENGINE_VERSION=0.9.5
 RUN git clone -b "${VOCIEVOX_ENGINE_VERSION}" --depth 1 https://github.com/Hiroshiba/voicevox_engine.git /opt/voicevox_engine
 WORKDIR /opt/voicevox_engine
 RUN sed -i -e '/pyopenjtalk/d' requirements.txt && pip3 install -r requirements.txt && pip3 install cython
@@ -92,7 +92,7 @@ RUN sed -i -e '/pyopenjtalk/d' requirements.txt && pip3 install -r requirements.
 COPY --from=download-core-env /etc/ld.so.conf.d/voicevox_core.conf /etc/ld.so.conf.d/voicevox_core.conf
 COPY --from=download-core-env /opt/voicevox_core /opt/voicevox_core
 # Clone VOICEVOX Core example
-ARG VOICEVOX_CORE_EXAMPLE_VERSION=0.9.0
+ARG VOICEVOX_CORE_EXAMPLE_VERSION=0.9.4
 RUN <<EOF
     git clone -b "${VOICEVOX_CORE_EXAMPLE_VERSION}" --depth 1 https://github.com/Hiroshiba/voicevox_core.git /opt/voicevox_core_example
     cd /opt/voicevox_core_example/example/python
