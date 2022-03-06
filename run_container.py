@@ -1,12 +1,14 @@
 import argparse
 import base64
+import multiprocessing
 import io
 import os
 import sys
 import zipfile
+from distutils.version import LooseVersion
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryFile
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import soundfile
@@ -16,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.responses import FileResponse
 
+from voicevox_engine import __version__
 from voicevox_engine.full_context_label import extract_full_context_label, pyopenjtalk
 from voicevox_engine.kana_parser import create_kana, parse_kana
 from voicevox_engine.model import (
@@ -27,82 +30,17 @@ from voicevox_engine.model import (
     Speaker,
 )
 from voicevox_engine.mora_list import openjtalk_mora2text
-from voicevox_engine.synthesis_engine import SynthesisEngine
+from voicevox_engine.synthesis_engine import SynthesisEngineBase, make_synthesis_engines
+from voicevox_engine.user_dict import user_dict_startup_processing
+from voicevox_engine.utility import engine_root
 
 kMoraLimit = 100
+enable_interrogative_upspeak = True
+
 class TTSRequest(BaseModel):
     text: str
     speaker: int
     speed: float = 1.0
-
-def make_synthesis_engine(
-    use_gpu: bool,
-    voicevox_dir: Optional[Path] = None,
-    voicelib_dir: Optional[Path] = None,
-) -> SynthesisEngine:
-    """
-    音声ライブラリをロードして、音声合成エンジンを生成
-
-    Parameters
-    ----------
-    use_gpu: bool
-        音声ライブラリに GPU を使わせるか否か
-    voicevox_dir: Path, optional, default=None
-        音声ライブラリの Python モジュールがあるディレクトリ
-        None のとき、Python 標準のモジュール検索パスのどれかにあるとする
-    voicelib_dir: Path, optional, default=None
-        音声ライブラリ自体があるディレクトリ
-        None のとき、音声ライブラリの Python モジュールと同じディレクトリにあるとする
-    """
-
-    pyopenjtalk.set_user_dict("/opt/voicevox_engine/user.dic")
-
-    # Python モジュール検索パスへ追加
-    if voicevox_dir is not None:
-        print("Notice: --voicevox_dir is " + voicevox_dir.as_posix(), file=sys.stderr)
-        if voicevox_dir.exists():
-            sys.path.insert(0, str(voicevox_dir))
-
-    has_voicevox_core = True
-    try:
-        import core
-    except ImportError:
-        import traceback
-
-        from voicevox_engine.dev import core
-
-        has_voicevox_core = False
-
-        # 音声ライブラリの Python モジュールをロードできなかった
-        traceback.print_exc()
-        print(
-            "Notice: mock-library will be used. Try re-run with valid --voicevox_dir",  # noqa
-            file=sys.stderr,
-        )
-
-    if voicelib_dir is None:
-        if voicevox_dir is not None:
-            voicelib_dir = voicevox_dir
-        else:
-            voicelib_dir = Path(__file__).parent  # core.__file__だとnuitkaビルド後にエラー
-
-    core.initialize(voicelib_dir.as_posix() + "/", use_gpu)
-
-    if has_voicevox_core:
-        return SynthesisEngine(
-            yukarin_s_forwarder=core.yukarin_s_forward,
-            yukarin_sa_forwarder=core.yukarin_sa_forward,
-            decode_forwarder=core.decode_forward,
-            speakers=core.metas(),
-        )
-
-    from voicevox_engine.dev.synthesis_engine import (
-        SynthesisEngine as mock_synthesis_engine,
-    )
-
-    # モックで置き換える
-    return mock_synthesis_engine(speakers=core.metas())
-
 
 def mora_to_text(mora: str):
     if mora[-1:] in ["A", "I", "U", "E", "O"]:
@@ -114,15 +52,17 @@ def mora_to_text(mora: str):
         return mora
 
 
-def generate_app(engine: SynthesisEngine) -> FastAPI:
-    root_dir = Path(__file__).parent
+def generate_app(
+    synthesis_engines: Dict[str, SynthesisEngineBase], latest_core_version: str
+) -> FastAPI:
+    root_dir = engine_root()
 
-    default_sampling_rate = engine.default_sampling_rate
+    default_sampling_rate = synthesis_engines[latest_core_version].default_sampling_rate
 
     app = FastAPI(
         title="VOICEVOX ENGINE",
         description="VOICEVOXの音声合成エンジンです。",
-        version=(root_dir / "VERSION.txt").read_text().strip(),
+        version=__version__,
     )
 
     app.add_middleware(
@@ -133,16 +73,27 @@ def generate_app(engine: SynthesisEngine) -> FastAPI:
         allow_headers=["*"],
     )
 
-    def replace_mora_data(
-        accent_phrases: List[AccentPhrase], speaker_id: int
-    ) -> List[AccentPhrase]:
-        return engine.replace_mora_pitch(
-            accent_phrases=engine.replace_phoneme_length(
-                accent_phrases=accent_phrases,
-                speaker_id=speaker_id,
-            ),
-            speaker_id=speaker_id,
-        )
+    @app.on_event("startup")
+    def apply_user_dict():
+        user_dict_startup_processing(compiled_dict_path=Path("/opt/voicevox_engine/user.dic"))
+
+    def get_engine(core_version: Optional[str]) -> SynthesisEngineBase:
+        if core_version is None:
+            return synthesis_engines[latest_core_version]
+        if core_version in synthesis_engines:
+            return synthesis_engines[core_version]
+        raise HTTPException(status_code=422, detail="不明なバージョンです")
+
+    # def replace_mora_data(
+    #     accent_phrases: List[AccentPhrase], speaker_id: int
+    # ) -> List[AccentPhrase]:
+    #     return engine.replace_mora_pitch(
+    #         accent_phrases=engine.replace_phoneme_length(
+    #             accent_phrases=accent_phrases,
+    #             speaker_id=speaker_id,
+    #         ),
+    #         speaker_id=speaker_id,
+    #     )
 
     def create_accent_phrases(text: str, speaker_id: int) -> List[AccentPhrase]:
         if len(text.strip()) == 0:
@@ -227,30 +178,6 @@ def generate_app(engine: SynthesisEngine) -> FastAPI:
         return waves_nparray, sampling_rate
 
     @app.post(
-        "/audio_query",
-        response_model=AudioQuery,
-        tags=["クエリ作成"],
-        summary="音声合成用のクエリを作成する",
-    )
-    def audio_query(text: str, speaker: int):
-        """
-        クエリの初期値を得ます。ここで得られたクエリはそのまま音声合成に利用できます。各値の意味は`Schemas`を参照してください。
-        """
-        accent_phrases = create_accent_phrases(text, speaker_id=speaker)
-        return AudioQuery(
-            accent_phrases=accent_phrases,
-            speedScale=1,
-            pitchScale=0,
-            intonationScale=1,
-            volumeScale=1,
-            prePhonemeLength=0.1,
-            postPhonemeLength=0.1,
-            outputSamplingRate=default_sampling_rate,
-            outputStereo=False,
-            kana=create_kana(accent_phrases),
-        )
-
-    @app.post(
         "/tts",
         response_class=FileResponse,
         responses={
@@ -266,7 +193,8 @@ def generate_app(engine: SynthesisEngine) -> FastAPI:
     def tts(body: TTSRequest):
         text = body.text
         speaker = body.speaker
-        accent_phrases = create_accent_phrases(text, speaker_id=speaker)
+        engine = get_engine(core_version=None)
+        accent_phrases = engine.create_accent_phrases(text, speaker_id=speaker)
         trunc = []
         mora_length = 0
         for accent in accent_phrases:
@@ -288,7 +216,7 @@ def generate_app(engine: SynthesisEngine) -> FastAPI:
             outputStereo=False,
             kana=create_kana(accent_phrases),
         )
-        wave = engine.synthesis(query=query, speaker_id=speaker)
+        wave = engine.synthesis(query=query, speaker_id=speaker, enable_interrogative_upspeak=enable_interrogative_upspeak)
 
         with NamedTemporaryFile(delete=False) as f:
             soundfile.write(
@@ -299,29 +227,57 @@ def generate_app(engine: SynthesisEngine) -> FastAPI:
 
     @app.get("/version", tags=["その他"])
     def version() -> str:
-        return (root_dir / "VERSION.txt").read_text()
+        return __version__
+
+    @app.get("/speakers", response_model=List[Speaker], tags=["その他"])
+    def speakers(
+        core_version: Optional[str] = None,
+    ):
+        engine = get_engine(core_version)
+        return Response(
+            content=engine.speakers,
+            media_type="application/json",
+        )
 
     return app
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=None)
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "50021")))
     parser.add_argument("--use_gpu", action="store_true")
     parser.add_argument("--voicevox_dir", type=Path, default=None)
-    parser.add_argument("--voicelib_dir", type=Path, default=None)
+    parser.add_argument("--voicelib_dir", type=Path, default=None, action="append")
+    parser.add_argument("--runtime_dir", type=Path, default=None, action="append")
+    parser.add_argument("--enable_mock", action="store_true")
+    parser.add_argument("--enable_cancellable_synthesis", action="store_true")
+    parser.add_argument("--init_processes", type=int, default=2)
+    parser.add_argument(
+        "--cpu_num_threads", type=int, default=os.getenv("VV_CPU_NUM_THREADS") or None
+    )
     args = parser.parse_args()
-    if args.port is None:
-        args.port = int(os.environ.get("PORT", "50021"))
+
+    cpu_num_threads: Optional[int] = args.cpu_num_threads
+
+    synthesis_engines = make_synthesis_engines(
+        use_gpu=args.use_gpu,
+        voicelib_dirs=args.voicelib_dir,
+        voicevox_dir=args.voicevox_dir,
+        runtime_dirs=args.runtime_dir,
+        cpu_num_threads=cpu_num_threads,
+        enable_mock=args.enable_mock,
+    )
+    assert len(synthesis_engines) != 0, "音声合成エンジンがありません。"
+    latest_core_version = str(max([LooseVersion(ver) for ver in synthesis_engines]))
+
+    cancellable_engine = None
+    if args.enable_cancellable_synthesis:
+        cancellable_engine = CancellableEngine(args)
+
     uvicorn.run(
-        generate_app(
-            make_synthesis_engine(
-                use_gpu=args.use_gpu,
-                voicevox_dir=args.voicevox_dir,
-                voicelib_dir=args.voicelib_dir,
-            )
-        ),
+        generate_app(synthesis_engines, latest_core_version),
         host=args.host,
         port=args.port,
     )
