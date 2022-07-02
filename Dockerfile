@@ -1,60 +1,50 @@
 # syntax=docker/dockerfile:1.3-labs
 
-ARG BASE_IMAGE=python:3.7.12-bullseye
-ARG BASE_RUNTIME_IMAGE=python:3.7.12-slim-bullseye
+ARG BASE_IMAGE=python:3.8.13-bullseye
+ARG BASE_RUNTIME_IMAGE=python:3.8.13-slim-bullseye
 
 # Download VOICEVOX Core shared object
 FROM ${BASE_IMAGE} AS download-core-env
 WORKDIR /work
 
-ARG VOICEVOX_CORE_VERSION=0.7.0
-ARG VOICEVOX_CORE_LIBRARY_NAME=core_cpu
+ARG VOICEVOX_CORE_ASSET_NAME=voicevox_core-linux-x64-cpu-0.12.3
+ARG VOICEVOX_CORE_VERSION=0.12.3
 RUN <<EOF
-    wget -nv --show-progress -c -O "./core.zip" "https://github.com/Hiroshiba/voicevox_core/releases/download/${VOICEVOX_CORE_VERSION}/core.zip"
-    unzip "./core.zip"
-    mv ./core /opt/voicevox_core
-    rm ./core.zip
-EOF
-
-RUN <<EOF
-    # Workaround: remove unused libcore (cpu, gpu)
-    # Prevent error: `/sbin/ldconfig.real: /opt/voicevox_core/libcore.so is not a symbolic link`
     set -eux
-    if [ "${VOICEVOX_CORE_LIBRARY_NAME}" = "core" ]; then
-        rm -f /opt/voicevox_core/libcore_cpu.so
-    elif [ "${VOICEVOX_CORE_LIBRARY_NAME}" = "core_cpu" ]; then
-        mv /opt/voicevox_core/libcore_cpu.so /opt/voicevox_core/libcore.so
-    else
-        echo "Invalid VOICEVOX CORE library name: ${VOICEVOX_CORE_LIBRARY_NAME}" >> /dev/stderr
-        exit 1
-    fi
-EOF
+    wget -nv --show-progress -c -O "./${VOICEVOX_CORE_ASSET_NAME}.zip" "https://github.com/VOICEVOX/voicevox_core/releases/download/${VOICEVOX_CORE_VERSION}/${VOICEVOX_CORE_ASSET_NAME}.zip"
+    unzip "./${VOICEVOX_CORE_ASSET_NAME}.zip"
+    mkdir /opt/voicevox_core
+    mv "${VOICEVOX_CORE_ASSET_NAME}/libcore.so" /opt/voicevox_core/
+    mv "${VOICEVOX_CORE_ASSET_NAME}/VERSION" /opt/voicevox_core/
+    rm -rf $VOICEVOX_CORE_ASSET_NAME
+    rm "./${VOICEVOX_CORE_ASSET_NAME}.zip"
 
-RUN <<EOF
     echo "/opt/voicevox_core" > /etc/ld.so.conf.d/voicevox_core.conf
     rm -f /etc/ld.so.cache
     ldconfig
 EOF
 
 
-# Download LibTorch
-FROM ${BASE_IMAGE} AS download-libtorch-env
+# Download ONNX Runtime
+FROM ${BASE_IMAGE} AS download-onnxruntime-env
 WORKDIR /work
 
-ARG LIBTORCH_URL=https://download.pytorch.org/libtorch/cpu/libtorch-cxx11-abi-shared-with-deps-1.9.0%2Bcpu.zip
+ARG ONNXRUNTIME_URL=https://github.com/microsoft/onnxruntime/releases/download/v1.10.0/onnxruntime-linux-x64-1.10.0.tgz
 RUN <<EOF
-    wget -nv --show-progress -c -O "./libtorch.zip" "${LIBTORCH_URL}"
-    unzip "./libtorch.zip"
-    mkdir -p /opt/libtorch
-    mv ./libtorch/lib/*.so /opt/libtorch
-    mv ./libtorch/lib/*.so.* /opt/libtorch
-    rm ./libtorch.zip
-EOF
+    set -eux
 
-RUN <<EOF
-    LIBTORCH_PATH="/opt/libtorch"
-    echo "${LIBTORCH_PATH}" > /etc/ld.so.conf.d/libtorch.conf
-    rm -f /etc/ld.so.cache
+    # Download ONNX Runtime
+    wget -nv --show-progress -c -O "./onnxruntime.tgz" "${ONNXRUNTIME_URL}"
+
+    # Extract ONNX Runtime to /opt/onnxruntime
+    mkdir -p /opt/onnxruntime
+    tar xf "./onnxruntime.tgz" -C "/opt/onnxruntime" --strip-components 1
+    rm ./onnxruntime.tgz
+
+    # Add /opt/onnxruntime/lib to dynamic library search path
+    echo "/opt/onnxruntime/lib" > /etc/ld.so.conf.d/onnxruntime.conf
+
+    # Update dynamic library search cache
     ldconfig
 EOF
 
@@ -69,25 +59,27 @@ RUN <<EOF
     rm -rf /var/lib/apt/lists/*
 EOF
 
-ARG VOCIEVOX_ENGINE_VERSION=0.7.0
-RUN git clone -b "${VOCIEVOX_ENGINE_VERSION}" --depth 1 https://github.com/Hiroshiba/voicevox_engine.git /opt/voicevox_engine
+ARG VOCIEVOX_ENGINE_VERSION=0.12.2
+RUN git clone -b "${VOCIEVOX_ENGINE_VERSION}" --depth 1 https://github.com/VOICEVOX/voicevox_engine.git /opt/voicevox_engine
 WORKDIR /opt/voicevox_engine
 RUN pip3 install -r requirements.txt
 
 # execute lazy_init and download mecab dic
 RUN python3 -c "import pyopenjtalk;print(pyopenjtalk.g2p('ハローワールド'))"
 
-COPY --from=download-core-env /etc/ld.so.conf.d/voicevox_core.conf /etc/ld.so.conf.d/voicevox_core.conf
-COPY --from=download-core-env /opt/voicevox_core /opt/voicevox_core
-# Clone VOICEVOX Core example
-ARG VOICEVOX_CORE_EXAMPLE_VERSION=0.7.0
 RUN <<EOF
-    git clone -b "${VOICEVOX_CORE_EXAMPLE_VERSION}" --depth 1 https://github.com/Hiroshiba/voicevox_core.git /opt/voicevox_core_example
-    cd /opt/voicevox_core_example/example/python
-    cp /opt/voicevox_core/core.h .
-    LIBRARY_PATH="$LIBRARY_PATH:/opt/voicevox_core" pip3 install .
-EOF
+    set -eux
 
+    mkdir /opt/dic
+    wget -O "additional_openjtalk_dic.zip" https://github.com/takana-v/additional_openjtalk_dic/releases/download/0.0.1/additional_openjtalk_dic.zip
+    unzip additional_openjtalk_dic.zip
+    cat additional_openjtalk_dic/additional_openjtalk_dic.csv >> default.csv
+    python -c "import pyopenjtalk;pyopenjtalk.create_user_dict('default.csv', 'user.dic')"
+    mv user.dic /opt/dic/user.dic
+    rm -rf additional_openjtalk_dic
+    rm additional_openjtalk_dic.zip
+    rm default.csv
+EOF
 
 # Runtime
 FROM ${BASE_RUNTIME_IMAGE} AS runtime-env
@@ -100,13 +92,13 @@ RUN <<EOF
     rm -rf /var/lib/apt/lists/*
 EOF
 
-COPY --from=download-core-env /etc/ld.so.conf.d/voicevox_core.conf /etc/ld.so.conf.d/voicevox_core.conf
+# COPY --from=download-core-env /etc/ld.so.conf.d/voicevox_core.conf /etc/ld.so.conf.d/voicevox_core.conf
 COPY --from=download-core-env /opt/voicevox_core /opt/voicevox_core
 
-COPY --from=download-libtorch-env /etc/ld.so.conf.d/libtorch.conf /etc/ld.so.conf.d/libtorch.conf
-COPY --from=download-libtorch-env /opt/libtorch /opt/libtorch
+# COPY --from=download-onnxruntime-env /etc/ld.so.conf.d/onnxruntime.conf /etc/ld.so.conf.d/onnxruntime.conf
+COPY --from=download-onnxruntime-env /opt/onnxruntime /opt/onnxruntime
 
-COPY --from=download-engine-env /usr/local/lib/python3.7/site-packages /usr/local/lib/python3.7/site-packages 
+COPY --from=download-engine-env /usr/local/lib/python3.8/site-packages /usr/local/lib/python3.8/site-packages 
 COPY --from=download-engine-env /opt/voicevox_engine /opt/voicevox_engine
 
 COPY ./run_container.py /opt/voicevox_engine/
@@ -114,6 +106,7 @@ COPY ./run_container.py /opt/voicevox_engine/
 COPY --chmod=775 ./entrypoint.sh /entrypoint.sh
 
 RUN useradd --create-home user && ldconfig
+COPY --from=download-engine-env /opt/dic/user.dic /home/user/.local/share/voicevox-engine/user.dic
 ENTRYPOINT [ "/entrypoint.sh" ]
 ENV PORT=50021
-CMD [ "gosu", "user", "python3", "-B", "./run_container.py", "--voicevox_dir", "/opt/voicevox_core/", "--voicelib_dir", "/opt/voicevox_core/", "--host", "0.0.0.0" ]
+CMD [ "gosu", "user", "python3", "-B", "./run_container.py", "--voicelib_dir", "/opt/voicevox_core/", "--runtime_dir", "/opt/onnxruntime/lib", "--host", "0.0.0.0" ]
