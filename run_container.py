@@ -63,6 +63,9 @@ def generate_app(
         speaker = body.speaker
         
         query = app.vvcore.audio_query(text, speaker)
+        query.volume_scale = 1.2
+        query.pre_phoneme_length = 0.15
+        query.post_phoneme_length = 0.1
         query.speed_scale = body.speed
         print(query)
         wave = app.vvcore.synthesis(query, speaker)
