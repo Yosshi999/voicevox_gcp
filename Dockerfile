@@ -7,7 +7,7 @@ ARG BASE_RUNTIME_IMAGE=python:3.8.13-slim-bullseye
 FROM ${BASE_IMAGE} AS download-onnxruntime-env
 WORKDIR /work
 
-ARG ONNXRUNTIME_URL=https://github.com/microsoft/onnxruntime/releases/download/v1.11.1/onnxruntime-linux-x64-1.11.1.tgz
+ARG ONNXRUNTIME_URL=https://github.com/microsoft/onnxruntime/releases/download/v1.13.1/onnxruntime-linux-x64-1.13.1.tgz
 RUN <<EOF
     set -eux
 
@@ -44,6 +44,7 @@ RUN <<EOF
     tar xzf sysdict.tar.gz -C /opt/dic
 EOF
 
+## extend dictionary
 #RUN pip install git+https://github.com/VOICEVOX/pyopenjtalk@f4ade29ef9a4f43d8605103cb5bacc29e0b2ccae#egg=pyopenjtalk
 #RUN <<EOF
 #    set -eux
@@ -69,12 +70,15 @@ RUN <<EOF
     rm -rf /var/lib/apt/lists/*
 EOF
 
-RUN pip install https://github.com/VOICEVOX/voicevox_core/releases/download/0.14.0-preview.2/voicevox_core-0.14.0rc2+cpu-cp38-abi3-linux_x86_64.whl
-RUN pip install fastapi uvicorn aiofiles soundfile
+RUN pip install --no-cache-dir \
+        fastapi uvicorn aiofiles soundfile \
+        https://github.com/VOICEVOX/voicevox_core/releases/download/0.14.1/voicevox_core-0.14.1+cpu-cp38-abi3-linux_x86_64.whl
 
 COPY --from=download-onnxruntime-env /etc/ld.so.conf.d/onnxruntime.conf /etc/ld.so.conf.d/onnxruntime.conf
 COPY --from=download-onnxruntime-env /opt/onnxruntime /opt/onnxruntime
 COPY --from=download-dict /opt/dic/ /opt/voicevox_engine/dic
+
+## extend dictionary
 #COPY --from=download-dict /opt/dic/user.dic /opt/voicevox_engine/user.dic
 
 COPY ./run_container.py /opt/voicevox_engine/
@@ -84,4 +88,3 @@ RUN useradd --create-home user && ldconfig
 ENTRYPOINT [ "/entrypoint.sh" ]
 ENV PORT=50021
 CMD [ "gosu", "user", "python3", "-B", "./run_container.py", "--open_jtalk_dict_dir", "/opt/voicevox_engine/dic/open_jtalk_dic_utf_8-1.11", "--host", "0.0.0.0" ]
-
