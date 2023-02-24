@@ -1,4 +1,5 @@
 import argparse
+import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryFile
 import time
@@ -24,6 +25,7 @@ def b64encode_str(s):
 
 def generate_app(
     open_jtalk_dict_dir: Optional[Path] = None,
+    cpu_num_threads = 0,
 ) -> FastAPI:
     app = FastAPI(
         title="VOICEVOX ENGINE",
@@ -42,6 +44,7 @@ def generate_app(
     def start_core():
         app.vvcore = VoicevoxCore(
             acceleration_mode=AccelerationMode("AUTO"),
+            cpu_num_threads=cpu_num_threads,
             open_jtalk_dict_dir=open_jtalk_dict_dir,
             load_all_models=True)
 
@@ -103,13 +106,15 @@ def generate_app(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=50021)
+    parser.add_argument("--port", type=int, default=os.environ.get("PORT", 50021))
+    parser.add_argument("--threads", type=int, default=os.environ.get("THREADS", 0),
+        help="The number of threads for ONNX Runtime. Default value 0 means AUTO.")
     parser.add_argument("--open_jtalk_dict_dir", type=Path, default=None)
 
     args = parser.parse_args()
 
     uvicorn.run(
-        generate_app(args.open_jtalk_dict_dir),
+        generate_app(args.open_jtalk_dict_dir, args.threads),
         host=args.host,
         port=args.port,
     )
