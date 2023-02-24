@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryFile
+import time
 from typing import Optional
 
 import soundfile
@@ -12,7 +13,6 @@ from starlette.responses import FileResponse
 
 from voicevox_core import AccelerationMode, VoicevoxCore
 
-kMoraLimit = 100
 class TTSRequest(BaseModel):
     text: str
     speaker: int
@@ -59,6 +59,7 @@ def generate_app(
         summary="音声合成する",
     )
     def tts(body: TTSRequest):
+        tic = time.perf_counter()
         text = body.text
         speaker = body.speaker
         
@@ -67,11 +68,27 @@ def generate_app(
         query.pre_phoneme_length = 0.15
         query.post_phoneme_length = 0.1
         query.speed_scale = body.speed
-        print(query)
+        print(body.text, ":", query)
         wave = app.vvcore.synthesis(query, speaker)
 
         with NamedTemporaryFile(delete=False) as f:
             f.write(wave)
+
+        # stat
+        moras = 0
+        speech_length = query.pre_phoneme_length + query.post_phoneme_length
+        for phrase in query.accent_phrases:
+            moras += len(phrase.moras)
+            for m in phrase.moras:
+                if m.consonant_length is not None:
+                    speech_length += m.consonant_length
+                if m.vowel_length is not None:
+                    speech_length += m.vowel_length
+        speech_length /= query.speed_scale
+
+        toc = time.perf_counter()
+        proctime = toc - tic
+        print("PERF", f"moras={moras}", f"wavtime={speech_length:.3f}", f"proctime={proctime:.3f}", f"genrate={speech_length / proctime}", f"text={query.kana}")
 
         return FileResponse(f.name, media_type="audio/wav")
 
