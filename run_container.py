@@ -5,7 +5,8 @@ from tempfile import NamedTemporaryFile, TemporaryFile
 import time
 from typing import Optional
 import io
-import wave
+import resampy
+import soundfile
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Response
@@ -73,15 +74,13 @@ def generate_app(
         query.post_phoneme_length = 0.1
         query.speed_scale = body.speed * 2.0
         print(body.text, ":", query)
-        ttswave = app.vvcore.synthesis(query, speaker)
+        binwave = app.vvcore.synthesis(query, speaker)
 
-        with NamedTemporaryFile(delete=False) as f:
-            orig = io.BytesIO(ttswave)
-            with wave.open(orig, "rb") as reader, wave.open(f, "wb") as writer:
-                writer.setnchannels(reader.getnchannels())
-                writer.setsampwidth(reader.getsampwidth())
-                writer.setframerate(reader.getframerate() // 2)
-                writer.writeframes(reader.readframes(reader.getnframes()))
+        with NamedTemporaryFile(delete=False, suffix=".wav") as f:
+            orig = io.BytesIO(binwave)
+            y, sr = soundfile.read(orig)
+            y = resampy.resample(y, sr // 2, sr)
+            soundfile.write(f, y, sr)
 
         # stat
         moras = 0

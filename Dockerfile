@@ -78,6 +78,8 @@ COPY --from=download-onnxruntime-env /etc/ld.so.conf.d/onnxruntime.conf /etc/ld.
 COPY --from=download-onnxruntime-env /opt/onnxruntime /opt/onnxruntime
 COPY --from=download-dict /opt/dic/ /opt/voicevox_engine/dic
 
+RUN pip install resampy
+
 ## extend dictionary
 #COPY --from=download-dict /opt/dic/user.dic /opt/voicevox_engine/user.dic
 
