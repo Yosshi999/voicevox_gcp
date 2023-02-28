@@ -4,8 +4,9 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryFile
 import time
 from typing import Optional
+import io
+import wave
 
-import soundfile
 import uvicorn
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -70,12 +71,17 @@ def generate_app(
         query.volume_scale = 1.2
         query.pre_phoneme_length = 0.15
         query.post_phoneme_length = 0.1
-        query.speed_scale = body.speed
+        query.speed_scale = body.speed * 2.0
         print(body.text, ":", query)
-        wave = app.vvcore.synthesis(query, speaker)
+        ttswave = app.vvcore.synthesis(query, speaker)
 
         with NamedTemporaryFile(delete=False) as f:
-            f.write(wave)
+            orig = io.BytesIO(ttswave)
+            with wave.open(orig, "rb") as reader, wave.open(f, "wb") as writer:
+                writer.setnchannels(reader.getnchannels())
+                writer.setsampwidth(reader.getsampwidth())
+                writer.setframerate(reader.getframerate() // 2)
+                writer.writeframes(reader.readframes(reader.getnframes()))
 
         # stat
         moras = 0
