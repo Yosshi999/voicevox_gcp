@@ -71,14 +71,12 @@ RUN <<EOF
 EOF
 
 RUN pip install --no-cache-dir \
-        fastapi uvicorn aiofiles soundfile \
+        fastapi uvicorn aiofiles soundfile librosa \
         https://github.com/VOICEVOX/voicevox_core/releases/download/0.14.1/voicevox_core-0.14.1+cpu-cp38-abi3-linux_x86_64.whl
 
 COPY --from=download-onnxruntime-env /etc/ld.so.conf.d/onnxruntime.conf /etc/ld.so.conf.d/onnxruntime.conf
 COPY --from=download-onnxruntime-env /opt/onnxruntime /opt/onnxruntime
 COPY --from=download-dict /opt/dic/ /opt/voicevox_engine/dic
-
-RUN pip install resampy
 
 ## extend dictionary
 #COPY --from=download-dict /opt/dic/user.dic /opt/voicevox_engine/user.dic

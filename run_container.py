@@ -5,8 +5,8 @@ from tempfile import NamedTemporaryFile, TemporaryFile
 import time
 from typing import Optional
 import io
-import resampy
 import soundfile
+import librosa
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Response
@@ -72,15 +72,22 @@ def generate_app(
         query.volume_scale = 1.2
         query.pre_phoneme_length = 0.15
         query.post_phoneme_length = 0.1
-        query.speed_scale = body.speed * 2.0
+        query.speed_scale = body.speed * 1.0
+        # shorten vowels
+        for phrase in query.accent_phrases:
+            for m in phrase.moras:
+                if m.vowel_length is not None:
+                    m.vowel_length /= 2.0
+
         print(body.text, ":", query)
         binwave = app.vvcore.synthesis(query, speaker)
 
         with NamedTemporaryFile(delete=False, suffix=".wav") as f:
             orig = io.BytesIO(binwave)
             y, sr = soundfile.read(orig)
-            y = resampy.resample(y, sr // 2, sr)
+            y = librosa.effects.time_stretch(y, rate=0.5)
             soundfile.write(f, y, sr)
+            wavtime = len(y) / sr
 
         # stat
         moras = 0
@@ -96,7 +103,7 @@ def generate_app(
 
         toc = time.perf_counter()
         proctime = toc - tic
-        print("PERF", f"moras={moras}", f"wavtime={speech_length:.3f}", f"proctime={proctime:.3f}", f"genrate={speech_length / proctime}", f"text={query.kana}")
+        print("PERF", f"moras={moras}", f"wav_time={wavtime:.3f}", f"speech_length={speech_length:.3f}", f"proctime={proctime:.3f}", f"genrate={wavtime / proctime}", f"text={query.kana}")
 
         return FileResponse(f.name, media_type="audio/wav")
 
