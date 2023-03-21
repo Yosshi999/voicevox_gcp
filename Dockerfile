@@ -71,7 +71,7 @@ RUN <<EOF
 EOF
 
 RUN pip install --no-cache-dir \
-        fastapi uvicorn aiofiles soundfile \
+        fastapi uvicorn aiofiles soundfile omegaconf \
         https://github.com/VOICEVOX/voicevox_core/releases/download/0.14.1/voicevox_core-0.14.1+cpu-cp38-abi3-linux_x86_64.whl
 
 COPY --from=download-onnxruntime-env /etc/ld.so.conf.d/onnxruntime.conf /etc/ld.so.conf.d/onnxruntime.conf
@@ -87,4 +87,4 @@ COPY --chmod=775 ./entrypoint.sh /entrypoint.sh
 RUN useradd --create-home user && ldconfig
 ENTRYPOINT [ "/entrypoint.sh" ]
 ENV PORT=50021
-CMD [ "gosu", "user", "python3", "-B", "./run_container.py", "--open_jtalk_dict_dir", "/opt/voicevox_engine/dic/open_jtalk_dic_utf_8-1.11", "--host", "0.0.0.0" ]
+CMD [ "gosu", "user", "python3", "-B", "./run_container.py" ]
