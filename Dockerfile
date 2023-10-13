@@ -71,8 +71,8 @@ RUN <<EOF
 EOF
 
 RUN pip install --no-cache-dir \
-        fastapi uvicorn aiofiles soundfile omegaconf \
-        https://github.com/VOICEVOX/voicevox_core/releases/download/0.14.1/voicevox_core-0.14.1+cpu-cp38-abi3-linux_x86_64.whl
+        fastapi uvicorn aiofiles soundfile omegaconf
+RUN pip install --no-cache-dir https://github.com/VOICEVOX/voicevox_core/releases/download/0.14.5/voicevox_core-0.14.5+cpu-cp38-abi3-linux_x86_64.whl
 
 COPY --from=download-onnxruntime-env /etc/ld.so.conf.d/onnxruntime.conf /etc/ld.so.conf.d/onnxruntime.conf
 COPY --from=download-onnxruntime-env /opt/onnxruntime /opt/onnxruntime
